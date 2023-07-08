@@ -18,7 +18,7 @@ namespace APX_Viewer
         }
 
         public enum GatherType { Normal, unk1, unk2, Pickaxe, Net}
-        public enum Game { MH1 = 0x40, MHG = 0x48, MH2 = 0x74, MHFZZ = 0xC0}
+        public enum Game { MH1 = 0x40, MHG = 0x48, MH2 = 0x74, MH2Arena = 0x64, MHFZZ = 0xC0, MHP = 0x3C}
         public enum DosObjective { Hunt = 0x01, Deliver = 0x02, Damage = 0x04 }
 
         public Game game;
@@ -69,7 +69,7 @@ namespace APX_Viewer
 
             gatheringSpots = new List<GatheringSpot>();
             areaOrigins = new List<AreaOrigin>();
-            uint dataptr = readInt(); //pointer to quest data (this gets copied into lobby.bin): 0x40 for base Mh1, 0x48 for MHG, 0x74 for MH2 (except arena matches use 0x64?), 0xC0 for MHFZZ
+            uint dataptr = readInt(); //pointer to quest data (this gets copied into lobby.bin): 0x40 for base Mh1, 0x48 for MHG, 0x74 for MH2 (except arena matches use 0x64?), 0xC0 for MHFZZ, 0x3C for mhp1
             game = (Game)dataptr;
             uint playerptr = readInt(); //player block, always 0x70?
             uint boxptr = readInt(); //box block
@@ -77,35 +77,58 @@ namespace APX_Viewer
             uint goalptr = readInt(); //goal block; @ 0x10
             uint entsptr = readInt(); //entity block
             uint monptr = readInt(); //monster block
-            uint linkptr = readInt(); //link block
-            uint originsptr = readInt(); //origins block; @ 0x20
-            uint campptr = readInt(); //camp block
-            uint gatherptr = readInt(); //gathering points block
-            uint mapobjptr = readInt(); //map objects block
+            uint linkptr = 0;//link block
+            uint originsptr = 0; //origins block; @ 0x20
+            uint campptr = 0; //camp block
+            uint gatherptr = 0; //gathering points block
+            uint mapobjptr = 0; //map objects block
+            if (game != Game.MHP)
+            {
+                linkptr = readInt(); //link block
+                originsptr = readInt(); //origins block; @ 0x20
+                campptr = readInt(); //camp block
+                gatherptr = readInt(); //gathering points block
+                mapobjptr = readInt(); //map objects block
+            }
+            else
+            {
+                uint camp = readInt(); //?
+                mapobjptr = readInt(); //map objects block
+            }
             uint resultptr = readInt(); //result text block; @ 0x30
             uint pattern;
             uint online;
             uint gextra = 0;
-            if (game != Game.MH2)
+            uint size = 0;
+            if (game != Game.MH2 && game != Game.MH2Arena)
             {
                 pattern = readInt(); //which HP set to use for monsters
                 readInt(); //HRP
                 online = readInt(); //online quest if set to 0xF
                 if (game == Game.MHG) //g quest
                 {
-                    readInt(); //pointer to quest restriction flags and quest ID?
-                    gextra = readInt(); //always zero?
+                    size = readShort(); //base monster size
+                    readByte(); //what monster carves
+                    readByte(); //what spawn to use
+                    gextra = readByte(); //monster size class
+                    readByte();//supply delivery type is byte 2:
+                    readByte();//0 is all available at start :)
+                    readByte();//1 is random supply delivery
+                    //2 is after arg3 monster is slain arg4 times!
                 }
             }
             else
             {
-                foliageptr = readInt(); //foliage pointer?
+                foliageptr = readInt(); //foliage pointer? maybe mosswine waypoints?
                 gatherpoolsptr = readInt(); //gather pools pointer
-                fishingptr = readInt(); //fishing pointer
-                fishpoolsptr = readInt(); //unknown pointer @ 0x40
-
-                readShort(); //always 64?
-                readShort(); //goal type mayhaps?
+                if (game != Game.MH2Arena)
+                {
+                    fishingptr = readInt(); //fishing pointer
+                    fishpoolsptr = readInt(); //fishing results pointer @ 0x40
+                }
+                size = readShort(); //base monster size percent
+                readByte(); //size group
+                readByte(); //need further info
                 pattern = readInt(); //high rank flag? HP pattern set?
                 readInt(); //HRP
                 online = readInt(); //online quest flag @ 0x50
@@ -124,10 +147,17 @@ namespace APX_Viewer
                 readInt(); //always 0x200? @ 0x70
                 //data pointer points to here!
                 readShort();
-                readShort(); //81A
+                readShort(); //81A, quest availability?
             }
-            ushort qtype = readByte(); //quest type (?)
-            ushort fulu = readByte();
+            ushort qtype = readByte(); //quest type
+            ushort fulu = readByte(); //0x01 modifies the endless delivery quests to list how many items were delivered by each player (ONLY says well-done steak)
+                                      //0x02 is the battle silence bit
+                                      //0x04 overrides room music with urgent tune (unused?)
+                                      //0x08 plays catless Cat Scat on room load (unused?)
+                                      //0x10 (Modori_dama_ck in mh1)... disables farcaster
+                                      //0x20 maxes the timer on quest clear (used in kulu huntathon, lao, and fata)
+                                      //0x40 disables quest difficulty roll (most low offline, offline subs, training, and fatas+lao)
+                                      //0x80 disables incrementing of quest difficulty (32d15e) (checked on new monster spawn, watchpoint 4b4868) (unused?)
             ushort stars = readShort(); //star level
             readInt(); //posting fee
             readInt(); //reward amount
@@ -257,7 +287,7 @@ namespace APX_Viewer
                         ushort v1 = readShort(); //ent type
                         readShort(); //model variation
                         readInt(); //the amount of lives this entity has, 0x63 is infinite. highest byte spawn area, sometimes second byte has a value too - respawn after corpse despawn?
-                        readInt(); //0
+                        readInt(); //0, two shorts? both set to -1 on load
                         readInt(); //0
                         readInt(); //0
                         readInt(); //0
@@ -281,6 +311,7 @@ namespace APX_Viewer
             //monster block
             filePos = (int)monptr;
             List<EntList> waves = new List<EntList>();
+            List<uint> montypes = new List<uint>();
             while (true)
             {
                 uint v1 = readInt(); //wave?
@@ -296,11 +327,18 @@ namespace APX_Viewer
             {
                 //read types in the room
                 filePos = (int)waves[w].typePtr;
-                readInt(); //first type
-                readInt(); //second type
-                readInt(); //third type
-                readInt(); //fourth type; FFFF is a blank entry
-
+                uint m1 = readInt(); //first type
+                uint m2 = readInt(); //second type
+                uint m3 = readInt(); //third type
+                uint m4 = readInt(); //fourth type; FFFF is a blank entry
+                if (m1 != 0xFFFFFFFF)
+                    montypes.Add(m1);
+                if (m2 != 0xFFFFFFFF)
+                    montypes.Add(m2);
+                if (m3 != 0xFFFFFFFF)
+                    montypes.Add(m3);
+                if (m4 != 0xFFFFFFFF)
+                    montypes.Add(m4);
                 //now read the entity entries for the room!
                 filePos = (int)waves[w].dataPtr;
                 while (true)
@@ -741,7 +779,8 @@ namespace APX_Viewer
                 while (true)
                 {
                     uint v1 = readInt(); //reward type; 0x8000 mh1 quest complete, 1 head break? 4 wing/back break? 5 claw break? 21-25 delivery rewards (multiples of 5 starting at 0.).
-                                         //11 - 15 are repel rewards? 2 - 20 are 757C bit (#-2). 0 is guaranteed drop, 1 is any part break?
+                                         //11 - 15 are repel rewards? 2 - 20 are 3C758C bit (#-2). 0 is guaranteed drop, 1 is any part break?
+                                         //so for specific part breaks i need to figure out how the bits are set
                                          //MH2: 8001 for main objective, 8002 for sub a, 8003 for sub b
                     uint v2 = readInt(); //reward pointer
                     if (v1 == 0xFFFF)
@@ -791,11 +830,17 @@ namespace APX_Viewer
             }*/
 
 
-            Debug.WriteLine("Online: " + online.ToString("X") + " stars: " + stars + " rank: " + pattern.ToString("X") + " gextra " + gextra.ToString("X"));
+            Debug.WriteLine("Online: " + online.ToString("X") + " stars: " + stars + " diff: " + pattern + " roll? " + ((fulu&0b01000000) == 0b01000000?"n":"y") + " base scale: " + size + " mons: ");
+            string[] mons = new string[] { "rathian", "fatalis", "kelbi", "mosswine", "bullfango", "yian kut ku", "lao shan lung", "cephadrome", "felyne", "mountain herb ojiisan", "rathalos", "aptonoth", "genprey", "diablos", "khezu", 
+                "velociprey", "gravios", "???", "vespoid", "gary", "plesioth", "basarios", "melynx", "hornetaur", "apceros", "monoblos", "velocidrome", "gendrome", "ROCK", "ioprey", "iodrome", "pugi", "kirin", "cephalos",
+            "giaprey", "c.fatalis", "p.rathian", "b.yian kut ku", "p.gary", "uhhhh???", "s.rathalos", "g.rathian", "b.diablos", "w.monoblos", "r.khezu", "g.plesioth", "b.gravios", "w.basarios", "a.rathalos", "a.lao shan lung"};
+            for (int m = 0; m < montypes.Count; m++)
+                Debug.Write(mons[montypes[m]-1] + " ");
+            Debug.Write("\n");
             //if (qtype != 1 && qtype != 2 && qtype != 4 && qtype != 9)
-            Debug.WriteLine("quest type: " + qtype);
-            if (fulu != 0)
-                Debug.WriteLine("fulu: " + fulu.ToString("X"));
+            //Debug.WriteLine("quest type: " + qtype);
+            //if (fulu != 0)
+            //    Debug.WriteLine("fulu: " + fulu.ToString("X"));
         }
     }
 }

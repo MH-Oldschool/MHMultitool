@@ -67,7 +67,7 @@ namespace APX_Viewer
                     {
                         jpkUncompress();
                         //write the file out
-                        using (BinaryWriter br = new BinaryWriter(File.Create(path + ogfile + "_" + i + ".bin")))
+                        using (BinaryWriter br = new BinaryWriter(File.Create(path + ogfile + "_" + i + (i==2?"_tbl":"") + ".bin")))
                             for (int b = 0; b < bufSize; b++)
                                 br.Write(readByte());
                     }

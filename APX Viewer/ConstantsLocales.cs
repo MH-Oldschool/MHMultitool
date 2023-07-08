@@ -13,7 +13,7 @@ namespace APX_Viewer
             public int type;
         }
 
-        public enum Locales { dummy, Fort, FnH, Desert, Swamp, Volcano, Jungle, Castle, Battleground, SpArena, Arena, Mountains, Town, Tower3, Tower2, Tower1, blank1, DesertNight, blank2, VolcanoNight, JungleNight}
+        public enum Locales { dummy, Fort, FnH, Desert, Swamp, Volcano, Jungle, Castle, Battleground, SpArena, Arena, Mountains, Town, Tower3, Tower2, Tower1, blank1, DesertNight, blank2, VolcanoNight, JungleNight, SpArenaNight = 24}
 
         public static readonly List<List<int>> MapScales = new List<List<int>>
         {

@@ -54,7 +54,7 @@ namespace APX_Viewer
                 while (br.BaseStream.Position < br.BaseStream.Length)
                     buffers[curBuf].Add(br.ReadByte());
             }
-            Debug.WriteLine("file loaded");
+            //Debug.WriteLine("file loaded");
         }
 
         public static void setBuffer(int buf)
@@ -174,11 +174,11 @@ namespace APX_Viewer
             {
                 string suf = "";
                 if (magic == 0x1A66686D)
-                    suf = "dat";
+                    suf = "dat"; //some other string data, maybe other data
                 else if (magic == 0x1A666E69)
-                    suf = "inf";
+                    suf = "inf"; //quest info string tables
                 else if (magic == 0x1A636170)
-                    suf = "pac";
+                    suf = "pac"; //npc dialogue tables
                 using (BinaryWriter bw = new BinaryWriter(File.Create(Directory.GetCurrentDirectory() + "\\decompress\\mhf" + suf + ".bin")))
                     for (int i = 0; i < bufSize; i++)
                         bw.Write(readByte());
@@ -531,6 +531,243 @@ namespace APX_Viewer
             //Debug.WriteLine("finished decompressing");
             curBuf = 1;
             //return readString(4);
+        }
+
+        public static void fexedecompress()
+        {
+            List<byte> dcom = new List<byte>();
+            filePos = 0xbcbd4;
+            fexedecompress(ref dcom);
+            Debug.WriteLine(dcom.Count.ToString("X"));
+            /*using(BinaryWriter bw = new BinaryWriter(File.Create(Directory.GetCurrentDirectory() + "\\export\\" + "exedecomp.bin")))
+            {
+                for (int i = 0; i < dcom.Count; i++)
+                    bw.Write(dcom[i]);
+            }*/
+            //now we could save the chunks out to the new buffer, what is this buffer even?
+            //starting at 0x1f8, should be an int of 1, c past is destination, 10 past is sze in bytes, 14 past is source address
+            //buffer is 0x1e000 total in size; we jump to 0x1c000 to start execution
+            {
+                buffers[1] = new List<byte>();
+                for (int i = 0; i < dcom.Count; i++)
+                    buffers[1].Add(dcom[i]);
+                byte[] bf = new byte[0x1e000];
+                curBuf = 1;
+                int entry = 0;
+                while(true)
+                {
+                    filePos = 0x1F8 + 0xC + 0x28*entry;
+                    entry++;
+                    uint dest = readInt();
+                    uint size = readInt();
+                    uint src = readInt();
+                    if (dest == 0)
+                        break;
+                    if (size == 0)
+                        continue;
+                    filePos = (int)src;
+                    for (int i = 0; i < size; i++)
+                        bf[i + dest] = readByte();
+                }
+                //now that they're all copied out, let's save the file?
+                /*using(BinaryWriter bw = new BinaryWriter(File.Create(Directory.GetCurrentDirectory() + "\\export\\" + "exephase2.bin")))
+                {
+                    for (int i = 0; i < bf.Length; i++)
+                    {
+                        if (bf[i] == null)
+                            bw.Write((byte)0);
+                        else
+                            bw.Write(bf[i]);
+                    }
+                }*/
+                filePos = 0;
+                buffers[1] = new List<byte>();
+                for (int i = 0; i < bf.Length; i++)
+                    buffers[1].Add(bf[i]);
+                //now we need to decompress the chunk from 0x1c101, and write it from 1c101 to 1c646?
+                filePos = 0x1c101;
+                dcom = new List<byte>();
+                fexedecompress(ref dcom);
+                Debug.WriteLine(dcom.Count.ToString("X"));//compare against 0x546?
+                using (BinaryWriter bw = new BinaryWriter(File.Create(Directory.GetCurrentDirectory() + "\\export\\" + "exephase2expand.bin")))
+                {
+                    for (int i = 0; i < dcom.Count; i++)
+                    {
+                        bw.Write(dcom[i]);
+                    }
+                }
+                filePos = 0x1c101;
+                for (int i = 0; i < dcom.Count; i++)
+                    buffers[1][filePos + i] = dcom[i]; //overwrite the old with the new
+            }
+
+            //now decompress the segments?
+            filePos = 0x1c12d;
+            while (true)
+            {
+                uint pos = readInt();
+                uint size = readInt();
+                if (pos == 0)
+                    break;
+                int bookmark = filePos;
+                dcom = new List<byte>();
+                filePos = (int)pos;
+                fexedecompress(ref dcom);
+                Debug.WriteLine("expected " + size.ToString("X") + ", got " + dcom.Count.ToString("X"));
+                filePos = (int)pos;
+                for (int i = 0; i < dcom.Count; i++)
+                {
+                    byte v = dcom[i];
+                    if (v == 0xE8 || v == 0xE9) //call or jump
+                    {
+                        int ptr = dcom[i+1] | (dcom[i+2]<<8) | (dcom[i+3]<<16) | (dcom[i+4]<<24);
+                        ptr -= i;
+                        dcom[i + 1] = (byte)(ptr);
+                        dcom[i + 2] = (byte)(ptr >> 8);
+                        dcom[i + 3] = (byte)(ptr >> 16);
+                        dcom[i + 4] = (byte)(ptr >> 24);
+                    }
+                    buffers[1][filePos + i] = v;
+                }
+                filePos = bookmark;
+            }
+
+            //and write out the final product!
+            using (BinaryWriter bw = new BinaryWriter(File.Create(Directory.GetCurrentDirectory() + "\\export\\" + "exephase2final.bin")))
+            {
+                for (int i = 0; i < buffers[1].Count; i++)
+                {
+                    bw.Write(buffers[1][i]);
+                }
+            }
+        }
+
+        private static void fexedecompress(ref List<byte> dcom)
+        {
+            byte flags = 0x80; //this bit will loop indefinitely until end condition
+            bool c = false;
+            uint eax = 0;
+            uint ecx = 0;
+            uint ebp = 0;
+            dcom.Add(readByte());
+            while (true)
+            {
+                if (fexebit(ref flags, ref c))
+                {
+                    if (fexebit(ref flags, ref c))
+                    {
+                        eax = 0;
+                        if (fexebit(ref flags, ref c))
+                        {
+                            //load a nybble into eax
+                            for (int i = 0; i < 4; i++)
+                            {
+                                eax <<= 1;
+                                eax += (uint)(fexebit(ref flags, ref c) ? 1 : 0);
+                            }
+                            if (eax == 0)
+                                dcom.Add(0);
+                            else
+                                dcom.Add(dcom[dcom.Count - (int)eax]);
+                        }
+                        else
+                        {
+                            byte al = readByte();
+                            ecx = 0;
+                            c = (al & 0x1) == 1;
+                            al >>= 1;
+                            if (al == 0)
+                                break;
+                            else
+                            {
+                                ecx = (uint)(2 + (c ? 1 : 0));
+                                eax &= 0xFFFFFF00;
+                                eax |= (uint)al;
+                                ebp = eax;
+                                for (int i = 0; i < ecx; i++)
+                                    dcom.Add(dcom[dcom.Count - (int)eax]);
+                            }
+                        }
+                    }
+                    else
+                    {
+                        eax = 1;
+                        fexefeed(ref eax, ref flags, ref c);
+                        eax -= 2;
+                        if (eax == 0)
+                        {
+                            ecx = 1;
+                            fexefeed(ref ecx, ref flags, ref c);
+                            for (int i = 0; i < ecx; i++)
+                                dcom.Add(dcom[dcom.Count - (int)ebp]);
+                        }
+                        else
+                        {
+                            eax -= 1;
+                            eax <<= 8;
+                            eax |= (uint)readByte();
+                            ebp = eax;
+                            ecx = 1;
+                            fexefeed(ref ecx, ref flags, ref c);
+                            if (eax >= 0x7D00)
+                            {
+                                ecx += 2;
+                                for (int i = 0; i < ecx; i++)
+                                    dcom.Add(dcom[dcom.Count - (int)eax]);
+                            }
+                            else
+                            {
+                                if (eax >= 0x500)
+                                {
+                                    ecx += 1;
+                                    for (int i = 0; i < ecx; i++)
+                                        dcom.Add(dcom[dcom.Count - (int)eax]);
+                                }
+                                else
+                                {
+                                    if (eax > 0x7F)
+                                    {
+                                        for (int i = 0; i < ecx; i++)
+                                            dcom.Add(dcom[dcom.Count - (int)eax]);
+                                    }
+                                    else
+                                    {
+                                        ecx += 2;
+                                        for (int i = 0; i < ecx; i++)
+                                            dcom.Add(dcom[dcom.Count - (int)eax]);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                else
+                    dcom.Add(readByte());
+
+            }
+        }
+
+        private static bool fexebit(ref byte b, ref bool c)
+        {
+            c = (b & 0x80) == 0x80;
+            b <<= 1;
+            if (b == 0x00) //this will always have carry set!
+            {
+                b = readByte();
+                c = (b & 0x80) == 0x80;
+                b <<= 1; //so instead of adc b,b we just shift and OR/add 1
+                b |= 0x01;
+            }
+            return c;
+        }
+        private static void fexefeed(ref uint reg, ref byte flags, ref bool c)
+        {
+            do
+            {
+                fexebit(ref flags, ref c);
+                reg <<= 1;
+                reg |= (uint)(c ? 1 : 0);
+            } while (fexebit(ref flags, ref c));
         }
 
         private static uint huffTableSize;

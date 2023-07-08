@@ -24,7 +24,10 @@ namespace APX_Viewer
             string filename = "";
             using (OpenFileDialog openFileDialog = new OpenFileDialog())
             {
-                openFileDialog.Filter = "APX files|*.apx|Texture bin files|*_tex.bin;*.txb;|Manual Decompress|*.*|TM2|*.TM2;yn*tex.bin|Movement Table|*_tbl.bin|Quest file|*.mib|Wii fpack file|*.fpk|Compressed AFS|*.AFS|Uncompressed AFS|DATA.BIN;*.AFS|multitex package|*.tex|AMO model|*.amo;*_amh.bin|PAC archive|*.pac|PZZ recompress|*.bin|Collision Maps|lw0*.bin;lg0*.bin;lwg*.bin|DTX archive|*.dtx|bin unpack|*.bin|jkr decompress|*.tmp|Quest fun|*.mib|Animation Destruction|*_tbl.bin|gather tables|*.69;*.95|meat zones|*.95";
+                openFileDialog.Filter = "APX files|*.apx|Texture bin files|*_tex.bin;*.txb;|Manual Decompress|*.*|TM2|*.TM2;yn*tex.bin|Movement Table|*_tbl.bin|Quest file|*.mib|Wii fpack file|*.fpk|" +
+                    "Compressed AFS|*.AFS|Uncompressed AFS|DATA.BIN;*.AFS|multitex package|*.tex|AMO model|*.amo;*_amh.bin|PAC archive|*.pac|PZZ recompress|*.bin|Collision Maps|lw0*.bin;lg0*.bin;lwg*.bin|" +
+                    "DTX archive|*.dtx|bin unpack|*.bin|jkr decompress|*.tmp|Quest fun|*.mib|Animation Destruction|*_tbl.bin|gather tables|*.69;*.95|meat zones|*.95|psp databin|DATA.BIN|mhp quest dump|*.bin|" +
+                    "animation parse|*.aan|mhfo exe decrypt|mhf.exe";
                 openFileDialog.FilterIndex = 2; //to save me some clicks
                 openFileDialog.RestoreDirectory = true;
 
@@ -277,27 +280,73 @@ namespace APX_Viewer
             else if (filter == 19)
             {
                 //load the animation file
-                //grab the second pointer of each block, and replace ALL the pointers with it per block
-                //???
+                //parse our lists
+                //copy the data out
                 //profit
-                uint animCount = FileBuffer.readInt();
+                //uint animCount = FileBuffer.readInt();
                 List<uint> ptrs = new List<uint>();
+                List<uint> animCts = new List<uint>();
+                List<uint> ptrs2 = new List<uint>();
+                List<uint> animCts2 = new List<uint>();
+                List<string> names = new List<string> { "Main", "Head", "Tail" }; 
                 while(true)
                 {
                     uint val = FileBuffer.readInt();
-                    if (val == 0xFFFFFFFF)
+                    uint val2 = FileBuffer.readInt();
+                    if (val == 0)
                         break;
-                    ptrs.Add(val);
-                    FileBuffer.readInt();
+                    ptrs.Add(val2);
+                    animCts.Add(val);
+                    animCts2.Add(FileBuffer.readInt());
+                    ptrs2.Add(FileBuffer.readInt());
                 }
-                for(int p = 0; p < ptrs.Count; p++)
+                if (!Directory.Exists(Directory.GetCurrentDirectory() + "\\export\\" + Path.GetFileNameWithoutExtension(filename) + "\\"))
+                    Directory.CreateDirectory(Directory.GetCurrentDirectory() + "\\export\\" + Path.GetFileNameWithoutExtension(filename) + "\\");
+                for (int sub = 0; sub < ptrs.Count; sub++)
                 {
-                    //grab the second value
-                    FileBuffer.filePos = (int)(ptrs[p] + 4);
-                    uint val = FileBuffer.readInt();
-                    FileBuffer.filePos = (int)ptrs[p];
-                    for (int a = 0; a < animCount; a++)
-                        ;//actually i don't know if i can write to the buffer lmao
+                    FileBuffer.filePos = (int)ptrs[sub];
+                    for (int p = 0; p < animCts[sub]; p++)
+                    {
+                        //grab the value
+                        uint val = FileBuffer.readInt();
+                        if (val == 0xFFFFFFFF)
+                            continue;
+                        int backup = FileBuffer.filePos;
+                        FileBuffer.filePos = (int)val;
+                        FileBuffer.readInt();
+                        FileBuffer.readInt();
+                        uint len = FileBuffer.readInt();
+                        FileBuffer.filePos -= 12;
+                        using (BinaryWriter bw = new BinaryWriter(File.Create(Directory.GetCurrentDirectory() + "\\export\\" + Path.GetFileNameWithoutExtension(filename) + "\\" + p + "_" + names[sub] + ".aan")))
+                        {
+                            for (int b = 0; b < len; b++)
+                                bw.Write(FileBuffer.readByte());
+                        }
+                        FileBuffer.filePos = backup;
+                    }
+                }
+                for (int sub = 0; sub < ptrs2.Count; sub++)
+                {
+                    FileBuffer.filePos = (int)ptrs2[sub];
+                    for (int p = 0; p < animCts2[sub]; p++)
+                    {
+                        //grab the value
+                        uint val = FileBuffer.readInt();
+                        if (val == 0xFFFFFFFF)
+                            continue;
+                        int backup = FileBuffer.filePos;
+                        FileBuffer.filePos = (int)val;
+                        FileBuffer.readInt();
+                        FileBuffer.readInt();
+                        uint len = FileBuffer.readInt();
+                        FileBuffer.filePos -= 12;
+                        using (BinaryWriter bw = new BinaryWriter(File.Create(Directory.GetCurrentDirectory() + "\\export\\" + Path.GetFileNameWithoutExtension(filename) + "\\sub_"+ p + "_" + names[sub] + ".aan")))
+                        {
+                            for (int b = 0; b < len; b++)
+                                bw.Write(FileBuffer.readByte());
+                        }
+                        FileBuffer.filePos = backup;
+                    }
                 }
             }
             else if(filter == 20)
@@ -423,12 +472,148 @@ namespace APX_Viewer
                     }
                 }
             }
+            else if(filter == 22)
+            {
+                //psp data.bin
+                //each int here is a file start??
+                //multiply by 2048, scale of 2KB
+                List<int> ptrs = new List<int>();
+                while(true)
+                {
+                    uint p = FileBuffer.readInt()*0x800;
+                    ptrs.Add((int)p);
+                    if (p == FileBuffer.bufSize)
+                        break;
+                }
+                string path = Path.GetDirectoryName(filename) + "\\extract\\";
+                if (!Directory.Exists(path))
+                    Directory.CreateDirectory(path);
+                for (int i = 0; i < ptrs.Count-1; i++)
+                {
+                    FileBuffer.filePos = ptrs[i];
+                    using (BinaryWriter br = new BinaryWriter(File.Create(path + i + ".bin")))
+                        for (int b = 0; b < ptrs[i + 1] - ptrs[i]; b++)
+                            br.Write(FileBuffer.readByte());
+
+                }
+            }
+            else if(filter == 23)
+            {
+                string path = Directory.GetParent(filename).FullName;
+                string[] files = Directory.GetFiles(path, "*.bin");
+                foreach (string f in files)
+                {
+                    //if (File.Exists(path + "\\m" + i.ToString("000") + ".mib"))
+                    //{
+                    FileBuffer.loadFile(f);
+                    //that's about it?
+                    FileBuffer.filePos = 0x5C;
+                    Debug.WriteLine(FileBuffer.readJISString());
+                    //}
+                }
+            }
+            else if(filter == 24)
+            {
+                MotionTable mt = new MotionTable();
+                mt.Parse();
+            }
+            else if(filter == 25)
+            {
+                FileBuffer.filePos = 0xBC15E;
+                byte[] dc = new byte[0x7A8];
+                for(int i = 0; i <= 0x7A4/4; i++)
+                {
+                    uint v = FileBuffer.readInt();
+                    v += 0x9a61adf1;
+                    v ^= 0x15651e22;
+                    dc[i * 4] = (byte)(v & 0xFF);
+                    dc[i * 4 + 1] = (byte)(v >> 8);
+                    dc[i * 4 + 2] = (byte)(v >> 16);
+                    dc[i * 4 + 3] = (byte)(v >> 24);
+                }
+                //now the second pass!
+                for(int i = 0; i <= 0x1B3; i++)
+                {
+                    uint v = (uint)(dc[0x7A3 - i * 4] + (dc[0x7A3 - i * 4 + 1] << 8) + (dc[0x7A3 - i * 4 + 2] << 16) + (dc[0x7A3 - i * 4 + 3] << 24));
+                    v ^= 0x29786713;
+                    v -= 0x635ddd50;
+                    v ^= 0x6445cb49;
+                    dc[0x7A3 - i * 4] = (byte)(v & 0xFF);
+                    dc[0x7A3 - i * 4 + 1] = (byte)(v >> 8);
+                    dc[0x7A3 - i * 4 + 2] = (byte)(v >> 16);
+                    dc[0x7A3 - i * 4 + 3] = (byte)(v >> 24);
+                }
+                //and the third pass!
+                for (int i = 0; i <= 0x5cc/4; i++)
+                {
+                    uint v = (uint)(dc[0x7A3 - i * 4] + (dc[0x7A3 - i * 4 + 1] << 8) + (dc[0x7A3 - i * 4 + 2] << 16) + (dc[0x7A3 - i * 4 + 3] << 24));
+                    v ^= 0x04423016;
+                    v -= 0x41d95d97;
+                    v -= 0x7ddb0b84;
+                    dc[0x7A3 - i * 4] = (byte)(v & 0xFF);
+                    dc[0x7A3 - i * 4 + 1] = (byte)(v >> 8);
+                    dc[0x7A3 - i * 4 + 2] = (byte)(v >> 16);
+                    dc[0x7A3 - i * 4 + 3] = (byte)(v >> 24);
+                }
+                //fourth pass!
+                for (int i = 0; i <= 0x144; i++)
+                {
+                    uint v = (uint)(dc[0x7A4 - i * 4] + (dc[0x7A4 - i * 4 + 1] << 8) + (dc[0x7A4 - i * 4 + 2] << 16) + (dc[0x7A4 - i * 4 + 3] << 24));
+                    v += 0x36af1f7d;
+                    v += 0x3bd6ae72;
+                    v ^= 0x41bb32c3;
+                    dc[0x7A4 - i * 4] = (byte)(v & 0xFF);
+                    dc[0x7A4 - i * 4 + 1] = (byte)(v >> 8);
+                    dc[0x7A4 - i * 4 + 2] = (byte)(v >> 16);
+                    dc[0x7A4 - i * 4 + 3] = (byte)(v >> 24);
+                }
+
+                //string thing
+                /*{
+                    uint key = 0x9c3b248e;
+                    FileBuffer.filePos = 0x16db0;//todo, fill this
+                    while (true)
+                    {
+                        byte v = FileBuffer.readByte();
+                        if (v == 0)
+                            break;
+                        key ^= v;
+                        for(int i = 0; i < 8; i++)
+                        {
+                            bool f = (key & 1) == 1;
+                            key >>= 1;
+                            if (f) key ^= 0xc1a7f39a;
+                            Debug.WriteLine(key.ToString("X8"));
+                        }
+                    }
+                    if (key == 0xB72551A7)
+                        Debug.WriteLine("MATCH");
+
+                }*/
+
+                //decompression of data at 0x4e3bd4 (bcbd4)
+                {
+                    FileBuffer.fexedecompress();
+
+                }
+
+
+                //write results
+                /*string path = Directory.GetCurrentDirectory() + "\\export\\";
+                using (BinaryWriter bw = new BinaryWriter(File.Create(path + "exe4.bin")))
+                {
+                    for (int i = 0; i < dc.Length; i++)
+                        bw.Write(dc[i]);
+                }
+
+                FileBuffer.filePos = 0x198;*/
+            }
+
             Text = Path.GetFileName(filename);
 
             Visible = true; //needed for some reason
             Activate();
         }
-
 
         void displayImage(Bitmap img)
         {

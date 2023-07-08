@@ -422,7 +422,7 @@ namespace APX_Viewer
                 int verts = 1; //1 indexed
                 int mats = 0;
                 List<int> usedmats = new List<int>();
-                if (amh && rootnodes.Count > 0)
+                if (amh && rootnodes.Count > 0 && false) //remove false when rigging is supported
                 {
                     //go through the nodes, draw any meshes
                     for (int t = 0; t < rootnodes.Count; t++)
